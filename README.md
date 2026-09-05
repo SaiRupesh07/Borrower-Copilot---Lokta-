@@ -1,260 +1,651 @@
 # Borrower Copilot
 
-A privacy-first self-assessment tool for Indian borrowers. It answers four
-questions before you walk into a lender's branch:
+**A privacy-first borrower self-assessment tool for India — helping borrowers understand whether to borrow, how much they can safely afford, what pricing is reasonable, and what EMI they should be comfortable with before negotiating with a lender.**
 
-1. Should I borrow at all?
-2. How much am I really eligible for?
-3. What is a fair interest rate for my profile?
-4. What EMI should I agree to?
+Borrower Copilot is a browser-based financial self-assessment product designed to close the information gap between borrowers and lenders. It answers four practical questions:
 
-It ends with a one-screen **Negotiation Card** you can show a lender.
+1. **Should I borrow at all?**
+2. **How much can I safely afford vs. what might a lender sanction?**
+3. **What interest-rate and effective APR range is reasonable for my profile?**
+4. **What EMI and tenure should I be comfortable with?**
 
-**This is a self-assessment product. It is not a credit-scoring tool, a
-loan-approval system, or a lender's decision.**
+The assessment concludes with a one-screen **Negotiation Card** that gives the borrower a concise set of numbers and talking points to take into a lending conversation.
+
+> **Important:** Borrower Copilot is an educational self-assessment tool. It is **not** a credit-scoring system, loan-approval engine, financial institution, or lender decisioning system. Its outputs are indicative estimates based on borrower-provided information and documented assumptions.
 
 ---
 
-## 1. Product overview
+## Table of Contents
 
-Borrower Copilot asks a small set of questions - adaptive to your income
-type and loan product - and runs them through a deterministic, documented
-rules engine (no ML, no invented or bureau-pulled credit score) to produce four outputs and a
-negotiation card. Everything runs in your browser; there is no backend
-and nothing is stored.
+- [Why Borrower Copilot?](#why-borrower-copilot)
+- [Product Principles](#product-principles)
+- [Core Features](#core-features)
+- [Architecture](#architecture)
+- [Project Structure](#project-structure)
+- [Separation of Concerns](#separation-of-concerns)
+- [Technology Stack](#technology-stack)
+- [Getting Started](#getting-started)
+- [Testing](#testing)
+- [Challenge Requirement Coverage](#challenge-requirement-coverage)
+- [Rules Engine](#rules-engine)
+- [Privacy Model](#privacy-model)
+- [Assumptions & Transparency](#assumptions--transparency)
+- [Benchmark Scenarios](#benchmark-scenarios)
+- [Known Limitations](#known-limitations)
+- [What I Would Build Next](#what-i-would-build-next)
+- [What Is Intentionally Out of Scope](#what-is-intentionally-out-of-scope)
+- [Engineering Quality](#engineering-quality)
+- [AI-Assisted Development Disclosure](#ai-assisted-development-disclosure)
+- [Project Documentation](#project-documentation)
+- [Final Position](#final-position)
 
-## 2. Problem statement
+---
 
-Indian borrowers, especially first-time or informally-employed borrowers,
-frequently walk into a lending conversation not knowing:
-- What a "fair" number actually looks like for their profile.
-- That the amount a lender is willing to sanction and the amount they can
-  *safely* repay are two very different things.
-- That an advertised interest rate is not the same as the effective
-  all-in cost once fees are included.
+## Why Borrower Copilot?
 
-Borrower Copilot exists to close that information gap before the
-negotiation starts, using nothing more than answers the borrower already
-knows about themselves.
+Many borrowers enter lending conversations without a clear understanding of:
 
-## 3. Key product decisions
+- How much debt they can realistically afford
+- The difference between **lender sanction capacity** and **safe repayment capacity**
+- Whether an advertised interest rate represents a reasonable price for their profile
+- How processing fees affect the **effective cost of borrowing**
+- How much EMI they should commit to without putting their monthly cash flow under unnecessary stress
 
-- **Safe amount ≠ lender sanction, always shown separately.** The UI shows
-  the safe borrowing range, a conservative recommended safe amount, and the
-  lender estimate, then tells the borrower which one to use.
-- **"Don't borrow" is a real, reachable outcome** - not just a UI state
-  that never fires. See `RULES.md` §13 and the Anita scenario.
-- **No opaque score.** The verdict is explicit if/else logic over named
-  risk flags, not a single composite number. A borrower-provided credit
-  score is optional input for rate banding; there is no bureau pull or
-  score invented by this tool.
-- **Unknown is never converted into a bad number.** Unknown credit score
-  widens the pricing range instead of assuming a poor score; unknown
-  income stability applies a moderate (not worst-case) haircut. See
-  `RULES.md` for exactly how every unknown is handled.
-- **Every number has a "Why?"** - every calculated figure in the UI has
-  an expandable, borrower-friendly explanation, generated by the same
-  rules engine that computed the number (no separate copy to keep in
-  sync).
-- **Ranges over false precision.** Interest rate, APR, and the safe
-  repayment capacity are shown as ranges; a conservative recommended safe
-  amount is also provided as a single starting point. EMI and
-  requested-amount figures are deterministic-given-inputs points.
-- **Confidence is visible everywhere**, computed from how much evidence
-  is actually known (see `RULES.md` §14), and missing information always
-  widens ranges/lowers confidence rather than narrowing them.
+Borrower Copilot addresses this gap *before* the borrower negotiates. The product intentionally prioritizes explainability, conservative affordability, transparency, and privacy over opaque scoring or false precision.
 
-## 4. Architecture
+---
+
+## Product Principles
+
+### 1. Safe borrowing is different from lender eligibility
+
+The product never treats lender capacity as the amount a borrower should automatically take. Results explicitly separate:
+
+- **Safe borrowing range**
+- **Recommended safe amount**
+- **Indicative lender sanction**
+- **Safe monthly EMI ceiling**
+
+The borrower is directed toward the safe amount, not simply the maximum amount a lender might approve.
+
+### 2. "Don't borrow" is a real outcome
+
+The system can explicitly recommend:
+
+- `BORROW`
+- `BORROW_LESS`
+- `DONT_BORROW`
+
+The `DONT_BORROW` path is not a cosmetic UI state — it is triggered by identifiable affordability and risk conditions, and is covered by the Anita benchmark scenario.
+
+### 3. No opaque credit score
+
+Borrower Copilot does not create a proprietary risk score. Instead, the rules engine evaluates named factors such as:
+
+- Existing EMI burden
+- Income stability
+- Recent repayment issues
+- High-cost existing debt
+- Credit information availability
+- Loan-to-income affordability
+- Product characteristics
+
+A borrower-provided credit score may optionally influence pricing bands. There is:
+
+- No credit-bureau pull
+- No invented credit score
+- No hidden ML model
+- No black-box approval decision
+
+### 4. Unknown information should not create false confidence
+
+Missing information is handled explicitly. For example:
+
+- Unknown credit score → wider pricing range
+- Unknown income stability → moderate conservative adjustment
+- Missing optional inputs → lower confidence rather than artificially improving affordability
+
+Unknown is never silently converted into zero risk.
+
+### 5. Every important number has a "Why?"
+
+Calculated figures in the UI expose an expandable explanation showing the reasoning behind the number. The explanation is generated from the same rules and result data used to calculate the output, reducing the risk of business logic and UI copy drifting apart.
+
+### 6. Ranges instead of false precision
+
+Where uncertainty exists, the product uses ranges rather than pretending to know an exact answer:
+
+- Fair interest rate → range
+- Indicative APR → range
+- Safe borrowing capacity → range
+- Recommended safe amount → conservative single starting point
+
+Deterministic inputs such as requested amount and EMI calculations remain point estimates.
+
+### 7. Confidence is visible
+
+The product communicates how complete the underlying borrower information is. Missing evidence reduces confidence and can widen the resulting ranges — making uncertainty part of the product rather than hiding it.
+
+---
+
+## Core Features
+
+### Adaptive borrower assessment
+
+The questionnaire starts with a compact set of core questions and adapts additional questions based on:
+
+- Income type
+- Loan purpose
+- Loan product
+- Existing debt
+- Credit information
+- Collateral
+- Repayment history
+
+Every additional question is tied to a downstream rule or output.
+
+### Affordability assessment
+
+The affordability engine evaluates borrower repayment capacity using a documented FOIR-style approach, considering:
+
+- Usable monthly income
+- Existing EMI obligations
+- Household commitments
+- Income stability
+- Risk adjustments
+- Product characteristics
+
+The result produces a conservative safe EMI ceiling.
+
+### Safe borrowing vs. lender sanction
+
+Two different calculations are deliberately maintained:
+
+| Calculation | Basis |
+|---|---|
+| **Borrower-safe amount** | The EMI the borrower can reasonably sustain |
+| **Indicative lender sanction** | An estimate of what a lender might sanction, based on repayment capacity and, where applicable, collateral/LTV constraints |
+
+These are intentionally not merged into a single number. For secured lending, sanction capacity uses the **lower of** collateral-based capacity vs. repayment-based capacity — preventing valuable collateral from being treated as a substitute for repayment ability.
+
+### Fair pricing
+
+The pricing engine produces:
+
+- Indicative fair interest-rate range
+- Effective APR range
+- Processing-fee impact
+- Profile-based pricing adjustments
+
+The system uses borrower-provided credit information when available and widens the pricing range when important information is unknown.
+
+### Indicative APR
+
+APR is estimated using periodic cash-flow IRR where valid inputs are available, considering:
+
+- Principal
+- Processing fees
+- Interest
+- EMI schedule
+- Tenure
+
+A documented fallback is used for invalid or non-convergent inputs. APR shown by Borrower Copilot is an **indicative estimate**, not a lender-issued or regulator-certified disclosure.
+
+### EMI and tenure trade-offs
+
+The product shows how borrowing changes across different repayment tenures. Longer tenure can reduce monthly EMI but increase total interest cost; shorter tenure can increase monthly cash-flow pressure while reducing overall interest burden. The product presents the trade-off rather than recommending tenure based on EMI alone.
+
+### Stress test
+
+The assessment includes an income stress scenario to test whether the recommended repayment remains manageable under reduced income.
+
+> The current stress case is explicitly **income reduction only**. It does not assume an interest-rate shock unless a rate-adjusted EMI calculation is actually applied — preventing the UI from claiming a stress scenario the underlying calculation doesn't perform.
+
+### Negotiation Card
+
+The final output is condensed into a one-screen Negotiation Card, giving the borrower practical numbers to take into a lender conversation:
+
+- Borrowing verdict
+- Requested amount
+- Safe borrowing range
+- Recommended safe amount
+- Indicative lender sanction
+- Safe EMI ceiling
+- Recommended tenure
+- Fair interest-rate range
+- Indicative APR
+- Stress-case repayment
+- Key negotiation points
+- Explanations for important numbers
+
+The goal is not to tell the borrower what loan to accept. The goal is to give the borrower a defensible starting position for negotiation.
+
+---
+
+## Architecture
+
+Borrower Copilot uses a deliberately simple, layered architecture:
+
+```
+┌─────────────────────────────┐
+│           React UI          │
+│  Questions / Results /      │
+│     Negotiation Card        │
+└──────────────┬───────────────┘
+               │
+┌──────────────▼───────────────┐
+│         Rules Engine          │
+│  Affordability · Eligibility  │
+│  Pricing/APR · EMI · Stress   │
+│  Routing · Confidence         │
+└──────────────┬───────────────┘
+               │
+┌──────────────▼───────────────┐
+│        Domain Models          │
+│   Borrower / Loan / Result    │
+└───────────────────────────────┘
+```
+
+The rules engine has **zero React dependency**. The core function:
+
+```ts
+calculateBorrowerAssessment(profile)
+```
+
+can be called independently from React components, unit tests, scenario tests, scripts, or a future UI. This keeps product logic deterministic, testable, and independent from presentation.
+
+---
+
+## Project Structure
 
 ```
 src/
-  domain/       Pure TypeScript types: borrower.ts, loan.ts, results.ts
-  rules/        The rules engine - callable independently of the UI.
-                calculateBorrowerAssessment(profile) returns everything.
-  data/         Question tree (with adaptive logic + declared impact),
-                loan product bands, and every numeric assumption.
-  utils/        Currency/percentage formatting, input validation.
-  components/   UI only. No business logic lives here.
-    onboarding/  Landing + privacy notice
-    questions/   The question flow (must + adaptive)
-    results/     The four-output results screen
-    negotiation/ The negotiation card
-    common/      Small shared UI atoms (badges, top bar)
+├── components/
+│   ├── common/
+│   │   ├── Badge.tsx
+│   │   └── TopBar.tsx
+│   ├── onboarding/
+│   │   ├── Landing.tsx
+│   │   └── PrivacyNotice.tsx
+│   ├── questions/
+│   │   └── QuestionFlow.tsx
+│   ├── results/
+│   │   └── ResultsScreen.tsx
+│   └── negotiation/
+│       └── NegotiationCard.tsx
+│
+├── data/
+│   ├── assumptions.ts
+│   ├── loanProducts.ts
+│   └── questions.ts
+│
+├── domain/
+│   ├── borrower.ts
+│   ├── loan.ts
+│   └── results.ts
+│
+├── rules/
+│   ├── affordability.ts
+│   ├── confidence.ts
+│   ├── eligibility.ts
+│   ├── emi.ts
+│   ├── index.ts
+│   ├── pricing.ts
+│   ├── routing.ts
+│   └── stress.ts
+│
+└── utils/
+    ├── buildProfile.ts
+    ├── currency.ts
+    ├── percentage.ts
+    └── validation.ts
+
 tests/
-  rules/        Unit tests for EMI math and engine edge cases
-  scenarios/    Priya / Ravi / Anita fixtures + assertions
+├── rules/
+│   ├── emi.test.ts
+│   └── engine.test.ts
+└── scenarios/
+    ├── fixtures.ts
+    └── scenarios.test.ts
+
+docs/
+├── THREE_RUNTHROUGHS.md
+└── WALKTHROUGH.md
+
+RULES.md
+README.md
 ```
 
-The rules engine has **zero React dependency** - you can call
-`calculateBorrowerAssessment(profile)` from a script, a test, or a future
-UI and get the same complete, typed result. This is deliberate: business
-logic must be testable and swappable independent of how it's presented.
+---
 
-## 5. Setup
+## Separation of Concerns
+
+| Layer | Responsibility |
+|---|---|
+| `domain/` | Typed borrower, loan, and result models |
+| `data/` | Questions, product bands, and numerical assumptions |
+| `rules/` | Deterministic financial decision logic |
+| `utils/` | Formatting and validation |
+| `components/` | Presentation and interaction |
+| `tests/rules/` | Rule and calculation correctness |
+| `tests/scenarios/` | End-to-end benchmark borrower behavior |
+| `docs/` | Product walkthroughs and scenario documentation |
+| `RULES.md` | Complete assumptions and decision rules |
+
+No business decision logic is intentionally placed inside React components.
+
+---
+
+## Technology Stack
+
+- **React**
+- **TypeScript**
+- **Vite**
+- **Vitest**
+- Browser-only execution
+- Deterministic TypeScript rules engine
+- No backend or database
+
+The application requires no API key and no external service for the core assessment.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js
+- npm
+
+### Installation
 
 ```bash
 npm install
+```
+
+### Start development server
+
+```bash
 npm run dev
 ```
 
-Open the printed local URL (usually `http://localhost:5173`).
+The application will be available at the local Vite URL, typically `http://localhost:5173`.
 
-Quick start requires no API key or environment variables. This is a
-browser-only app with no backend, database, or login.
-
-## Requirements coverage
-
-| Challenge requirement | Implementation |
-| --- | --- |
-| Borrow verdict | `src/rules/index.ts` |
-| Safe amount | `src/rules/eligibility.ts` |
-| Lender sanction | `src/rules/eligibility.ts` |
-| Fair rate | `src/rules/pricing.ts` |
-| Indicative effective APR | `src/rules/pricing.ts` |
-| EMI and tenure trade-off | `src/rules/emi.ts` |
-| Income stress test | `src/rules/stress.ts` |
-| Adaptive questions | `src/data/questions.ts` |
-| Confidence | `src/rules/confidence.ts` |
-| Negotiation Card | `src/components/negotiation/` |
-| Documented assumptions | `RULES.md` |
-| Benchmark scenarios | `tests/scenarios/` |
-
-## 6. Running locally
+### Production build
 
 ```bash
-npm run dev      # start the dev server
-npm run build    # type-check + production build to dist/
-npm run preview  # preview the production build
+npm run build
 ```
 
-## 7. Testing
+The production build is generated in `dist/`.
+
+Preview the production build locally:
+
+```bash
+npm run preview
+```
+
+---
+
+## Testing
+
+Run the complete test suite:
 
 ```bash
 npm test
 ```
 
-This runs the full Vitest suite: EMI math correctness, reverse-EMI,
-every required edge case (unknown credit score, high existing EMI,
-recent bounce, requested-vs-safe amount, stress scenarios, different
-tenures, processing-fee effect on APR, secured vs unsecured pricing,
-zero/negative/very-high/very-low income, missing optional fields), and
-the three benchmark borrower scenarios.
+The test suite covers:
 
-## 8. Rules-engine explanation
+- EMI calculation correctness
+- Reverse EMI calculations
+- Tenure scenarios
+- Affordability boundaries
+- Existing EMI stress
+- Recent repayment bounce
+- Unknown credit information
+- Requested amount vs. safe amount
+- Income stress scenarios
+- Processing-fee impact on APR
+- Secured vs. unsecured pricing
+- Very low / zero / negative / high income edge cases
+- Missing optional information
+- Three benchmark borrower scenarios
 
-The engine lives in `src/rules/` and is organised by concern:
+---
 
-- `affordability.ts` - usable income, FOIR, safe EMI ceiling, risk flags
-- `pricing.ts` - fair interest rate range + indicative APR (periodic
-  cash-flow IRR, with a documented fallback for invalid inputs)
-- `emi.ts` - the standard amortising EMI formula and tenure scenarios
-- `eligibility.ts` - safe amount vs. likely lender sanction (kept
-  strictly separate, computed by different methods)
-- `stress.ts` - an income-only stress test; it does not claim a rate shock
-  unless a rate-adjusted EMI calculation is actually applied
-- `routing.ts` - suggests a different product path when the borrower's
-  profile (e.g. self-employed with usable collateral) suggests one
-- `confidence.ts` - counts missing evidence and derives HIGH/MEDIUM/LOW
-- `index.ts` - `calculateBorrowerAssessment()`, which composes the above
-  and applies the explicit borrow/borrow-less/don't-borrow rules
+## Challenge Requirement Coverage
 
-Every threshold used by these files lives in `src/data/assumptions.ts`
-and is documented in **[`RULES.md`](./RULES.md)**.
+| Requirement | Implementation |
+|---|---|
+| Borrow / Borrow Less / Don't Borrow | `src/rules/index.ts` |
+| Safe borrowing amount | `src/rules/eligibility.ts` |
+| Indicative lender sanction | `src/rules/eligibility.ts` |
+| Fair interest-rate range | `src/rules/pricing.ts` |
+| Indicative effective APR | `src/rules/pricing.ts` |
+| EMI calculation | `src/rules/emi.ts` |
+| Tenure trade-off | `src/rules/emi.ts` |
+| Income stress test | `src/rules/stress.ts` |
+| Adaptive questionnaire | `src/data/questions.ts` |
+| Confidence | `src/rules/confidence.ts` |
+| Product routing | `src/rules/routing.ts` |
+| Negotiation Card | `src/components/negotiation/` |
+| Documented assumptions | `RULES.md` |
+| Benchmark borrowers | `tests/scenarios/` |
 
-## 9. Privacy model
+---
 
-- No login, no account.
-- No credit bureau pull of any kind.
-- No backend - every calculation happens in your browser.
-- Borrower data is held in React state only (never `localStorage`) and
-  disappears when you refresh or close the tab.
-- A "Start over" control is always available to clear your answers.
+## Rules Engine
 
-## 10. Assumptions
+The rules engine is organized by financial concern:
 
-See **[`RULES.md`](./RULES.md)** for the complete, numbered table of
-every threshold, haircut, and band used, each tagged as either "My
-judgement" or "Market observation" - nothing is presented as a
-regulatory rule unless it genuinely is one (none of the numeric
-thresholds in this product are).
+**`affordability.ts`**
+Calculates usable income, FOIR-style affordability, safe EMI ceiling, and affordability risk flags.
 
-## 11. Known limitations
+**`pricing.ts`**
+Calculates the fair interest-rate range, indicative APR, processing-fee impact, and pricing adjustments. APR uses periodic cash-flow IRR with a documented fallback.
 
-- Product rate/fee bands are broad market indications, not live
-  lender-specific data - a reviewer should not treat any number here as
-  what a specific bank will actually quote.
-- The APR is an indicative periodic cash-flow IRR estimate, not a
-  regulator-certified disclosure; invalid inputs use a documented
-  fee-spread fallback.
-- The engine does not verify anything the borrower enters - it is a
-  self-assessment based entirely on stated answers.
-- Adaptive question coverage is intentionally not exhaustive (see
-  "What I intentionally did not build" below) - it covers the borrower
-  segments in the brief well, not every possible Indian borrower
-  situation.
-- Collateral-based sanction estimation takes the lower of collateral LTV
-  and repayment capacity; it does not model legal/title complexities.
-- Co-applicant income is handled conservatively: it may modestly affect
-  pricing, but is not added to the borrower's safe EMI or sanction capacity.
-- The safe-amount range can be wide for products with a broad tenure
-  window (e.g. 12-60 months), because it spans the full tenure/rate
-  combination space rather than assuming one tenure - this is
-  intentional (a range, not false precision) but worth knowing when
-  reading the number.
+**`emi.ts`**
+Implements the standard amortizing EMI formula, reverse EMI/principal calculations, and tenure comparisons.
 
-## 12. The three borrower scenarios
+**`eligibility.ts`**
+Separates borrower-safe borrowing capacity from indicative lender sanction capacity. For secured products, sanction is constrained by both collateral LTV capacity **and** repayment capacity — the lower of the two is used.
 
-Full question-by-question run-throughs are in
-**[`docs/THREE_RUNTHROUGHS.md`](./docs/THREE_RUNTHROUGHS.md)**. Summary:
+**`stress.ts`**
+Runs the income-only stress scenario.
 
-- **Priya** (29, salaried, strong profile, ₹8L wedding loan) - lands in
-  `BORROW`, a comparatively narrow/well-priced fair-rate range, and a
-  safe EMI comfortably inside her theoretical lender capacity.
-- **Ravi** (42, self-employed, kirana store, thin credit file, valuable
-  shop collateral) - the engine widens pricing confidence, does **not**
-  treat his unknown credit score as poor, and the routing rule steers
-  him toward a secured/business lending path rather than a plain
-  personal loan.
-- **Anita** (35, informal/gig income, existing high-cost debt, a recent
-  bounce) - lands in `DONT_BORROW`, with the recent bounce and high-cost
-  debt both surfaced prominently; the scooter's potential to raise her
-  income is acknowledged but does not override the current stress
-  signal.
+**`routing.ts`**
+Identifies cases where another product path may be more appropriate (e.g., a self-employed borrower with usable collateral).
 
-## 13. What I would build next
+**`confidence.ts`**
+Derives confidence from information completeness.
 
-- Multi-lender offer comparison (paste in 2-3 quotes, compare against
-  the fair-rate range).
-- Document-assisted income verification (e.g. parsing a bank statement
-  PDF locally, still with no upload to a server).
-- Real, licensed lender rate-card data instead of broad market bands.
-- Optional, explicit-consent credit bureau integration (still keeping
-  "no bureau pull" as the honest default).
-- Multilingual support (Hindi + regional languages), since the target
-  users often are not primarily English speakers.
-- Scenario comparison (e.g. "what if I extend tenure by a year?").
-- Basic debt-consolidation guidance when high-cost existing debt is
-  detected.
-- Richer business-income assessment for self-employed borrowers (e.g.
-  seasonal cash-flow patterns).
+**`index.ts`**
+Composes the complete assessment via `calculateBorrowerAssessment(profile)` and applies the explicit `BORROW` / `BORROW_LESS` / `DONT_BORROW` decision rules.
 
-## 14. What I intentionally did not build
+All numerical thresholds are centralized in `src/data/assumptions.ts` and documented in `RULES.md`.
 
-Per the brief: no authentication, no backend/database, no real bureau
-API, no loan application submission, no fake lender approval, no ML/AI
-credit score, no unnecessary charts/dashboards, no social features, no
-notifications, no payment integration. The rate/fee "bands" are
-intentionally coarse rather than an exhaustive lender-by-lender rate
-card - that level of detail would need constantly-updated real data and
-was out of scope for a focused build.
+---
 
-## 15. How AI was used
+## Privacy Model
 
-Claude Code was used as an implementation accelerator for domain
-modelling, rules-engine implementation, UI development, testing, and
-documentation. Product decisions, assumptions, rules, and final validation
-were reviewed against the challenge requirements. The three benchmark
-scenarios and all engine edge cases were run against the actual TypeScript
-implementation (not asserted from theory) - see
-`tests/scenarios/scenarios.test.ts` and `tests/rules/engine.test.ts`,
-all of which pass (`npm test`).
+Privacy is a core product requirement, not an afterthought. Borrower Copilot has:
+
+- **No login**
+- **No user account**
+- **No backend**
+- **No database**
+- **No credit-bureau integration**
+- **No server-side borrower storage**
+- **No `localStorage` persistence**
+
+Borrower inputs exist only in browser-side React state. Refreshing or closing the tab clears the assessment. A **Start Over** control is also available to clear the current assessment.
+
+---
+
+## Assumptions & Transparency
+
+All financial thresholds and product assumptions are documented in **[RULES.md](./RULES.md)**.
+
+Each assumption is explicitly classified as either:
+
+- **My judgement**
+- **Market observation**
+
+The product does not present its own numerical thresholds as regulatory requirements. Where a regulatory concept is referenced, the implementation is intentionally described as an approximation rather than implying regulatory certification.
+
+---
+
+## Benchmark Scenarios
+
+The project includes three benchmark borrowers from the challenge brief. Detailed question-by-question walkthroughs are available in **[docs/THREE_RUNTHROUGHS.md](./docs/THREE_RUNTHROUGHS.md)**.
+
+### Priya — Salaried borrower
+
+A 29-year-old Bengaluru-based software engineer with strong income and credit information seeking an ₹8L wedding loan.
+
+**Expected behavior:**
+- `BORROW`
+- Relatively narrow fair-rate range
+- Comfortable safe EMI
+- Clear separation between safe capacity and lender capacity
+
+### Ravi — Self-employed borrower
+
+A 42-year-old Mysuru kirana-store owner with a thin formal credit file and valuable unencumbered shop collateral, seeking ₹15L for inventory and a delivery vehicle.
+
+**Expected behavior:**
+- Pricing range widened due to limited credit evidence
+- Unknown credit score is **not** treated as a poor score
+- Secured/business lending route is surfaced
+- Repayment capacity remains a constraint despite collateral
+
+### Anita — High-stress borrower
+
+A 35-year-old informal/gig worker with existing high-cost app loans and a recent EMI bounce, seeking ₹1.5L for an electric scooter.
+
+**Expected behavior:**
+- `DONT_BORROW`
+- Existing high-cost debt surfaced
+- Recent repayment issue surfaced
+- Current affordability stress takes priority
+- Potential future income improvement does not automatically override current repayment risk
+
+---
+
+## Known Limitations
+
+**Market data** — Product interest-rate and fee bands are broad market-reference assumptions rather than live lender quotes; they should not be interpreted as the rate a particular lender will offer.
+
+**APR** — The APR is an indicative periodic cash-flow IRR estimate, not a lender-issued or regulator-certified disclosure. Invalid inputs use the documented fallback calculation.
+
+**User-provided information** — The system does not independently verify borrower inputs. Results are only as reliable as the information provided.
+
+**Coverage** — The adaptive questionnaire focuses on the borrower segments described in the challenge rather than attempting to model every possible Indian lending scenario.
+
+**Collateral** — Collateral-based sanction estimation uses the lower of LTV capacity and repayment capacity. It does not model detailed legal, title, valuation, enforcement, or lender-specific collateral requirements.
+
+**Co-applicants** — Co-applicant income is treated conservatively. It may influence pricing in limited cases but is not automatically added to the primary borrower's safe EMI or sanction capacity.
+
+**Wide ranges** — Safe borrowing ranges may be relatively wide for products with broad tenure windows (e.g., a 12–60 month product can produce materially different principal capacities at the same EMI depending on rate and tenure). This is intentional: the product prefers an honest range over false precision.
+
+---
+
+## What I Would Build Next
+
+Potential extensions, while preserving the privacy-first design:
+
+1. **Multi-lender quote comparison** — paste 2–3 lender offers and compare rates and APR against the fair-price range.
+2. **Local document-assisted verification** — parse bank statements locally in the browser, avoiding sending financial documents to a server.
+3. **Licensed lender rate-card integration** — replace broad market assumptions with current lender-specific data.
+4. **Optional bureau integration** — with explicit consent, clearly separated from the default no-bureau experience.
+5. **Multilingual experience** — Hindi and regional Indian languages.
+6. **Scenario comparison** — compare different loan amounts, rates, and tenures side-by-side.
+7. **Debt-consolidation guidance** — structured guidance when expensive existing debt is detected.
+8. **Richer self-employed assessment** — seasonal cash flow, business volatility, revenue consistency, tax/income documentation patterns.
+
+---
+
+## What Is Intentionally Out of Scope
+
+To keep the product focused and privacy-first, the current version does not include:
+
+- Authentication
+- User accounts
+- Backend services
+- Database storage
+- Credit-bureau APIs
+- Loan application submission
+- Real lender approval
+- Proprietary ML credit scoring
+- Social features
+- Notifications
+- Payment processing
+- Exhaustive lender-by-lender rate cards
+- Unnecessary dashboards or visualizations
+
+The product is intentionally a transparent borrower decision-support layer, not a lending platform.
+
+---
+
+## Engineering Quality
+
+The implementation emphasizes:
+
+- **Determinism** — same borrower profile → same assessment
+- **Testability** — core business rules are independent of React
+- **Explainability** — calculated outputs expose their underlying reasoning
+- **Explicit uncertainty** — missing information reduces confidence instead of silently improving the result
+- **Separation of concerns** — UI, domain models, assumptions, calculations, and tests are separated
+- **Conservative financial reasoning** — the product prioritizes sustainable repayment capacity over maximum theoretical borrowing
+
+---
+
+## AI-Assisted Development Disclosure
+
+Claude Code was used as an implementation accelerator for:
+
+- Domain modelling
+- Rules-engine implementation
+- UI development
+- Testing
+- Documentation
+- Code review iterations
+
+Product decisions, assumptions, financial rules, benchmark behavior, and final validation were reviewed against the challenge requirements. The benchmark borrowers and engine edge cases were executed against the actual TypeScript implementation through the project's automated test suite rather than being documented only as theoretical examples.
+
+Relevant tests:
+
+```
+tests/scenarios/scenarios.test.ts
+tests/rules/engine.test.ts
+tests/rules/emi.test.ts
+```
+
+Run `npm test` to verify the current implementation.
+
+---
+
+## Project Documentation
+
+Additional documentation:
+
+- **[RULES.md](./RULES.md)** — complete rules, assumptions, thresholds, and rationale
+- **[docs/THREE_RUNTHROUGHS.md](./docs/THREE_RUNTHROUGHS.md)** — Priya, Ravi, and Anita walkthroughs
+- **[docs/WALKTHROUGH.md](./docs/WALKTHROUGH.md)** — product walkthrough and assessment flow
+
+---
+
+## Final Position
+
+Borrower Copilot is deliberately **not** trying to answer:
+
+> "How much money will a lender give me?"
+
+It is trying to answer the more useful borrower question:
+
+> "What amount can I reasonably afford, what pricing should I negotiate for, and what should I be comfortable agreeing to?"
+
+That distinction is the core product decision behind the system.
+
+**Status:** Challenge implementation complete.
